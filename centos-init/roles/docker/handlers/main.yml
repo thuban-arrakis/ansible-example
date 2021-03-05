@@ -1,0 +1,21 @@
+---
+- name: OS | Update ca trust
+  command: update-ca-trust extract
+
+- name: OS | Reload systemd
+  command: systemctl daemon-reload
+
+- name: Docker | Start docker
+  service:
+    name: docker
+    state: restarted
+
+- name: OS | Restart dhcp server
+  service:
+    name: network
+    state: restarted
+
+- name: OS | Restart chronyd service
+  service:
+    name: chronyd
+    state: restarted

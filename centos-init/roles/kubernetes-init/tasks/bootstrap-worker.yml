@@ -1,0 +1,50 @@
+---
+- name: Kubernetes Worker | Enable & start kubelet
+  service:
+    name: kubelet
+    enabled: yes
+    state: started
+  when: not is_kube_master
+
+- name: Kubernetes worker | Set kubeadm_token to generated token
+  set_fact:
+    kubeadm_token: "{{ temp_token.stdout }}"
+  when: not is_kube_master
+
+- name: Kubernetes worker | Create kubeadm client config
+  template:
+    src: "kubeadm-client.conf.j2"
+    dest: "{{ kube_config_dir }}/kubeadm-client.conf"
+    backup: yes
+  when: not is_kube_master
+
+- name: Kubernetes worker | Join worker node to cluster
+  when: not is_kube_master
+  block:
+
+    - name: Join to cluster
+      command: >-
+        timeout -k {{ kubeadm_join_timeout }} {{ kubeadm_join_timeout }}
+        {{ bin_dir }}/kubeadm join
+        --config {{ kube_config_dir }}/kubeadm-client.conf
+        --ignore-preflight-errors=DirAvailable--etc-kubernetes-manifests
+      register: kubeadm_join
+
+  rescue:
+
+    - name: Join to cluster with ignores
+      command: >-
+        timeout -k {{ kubeadm_join_timeout }} {{ kubeadm_join_timeout }}
+        {{ bin_dir }}/kubeadm join
+        --config {{ kube_config_dir }}/kubeadm-client.conf
+        --ignore-preflight-errors=all
+      register: kubeadm_join
+
+  always:
+
+    - name: Display kubeadm join stderr if any
+      when: kubeadm_join is failed
+      debug:
+        msg: |
+          Joined with warnings
+          {{ kubeadm_join.stderr_lines }}

@@ -1,0 +1,25 @@
+[all]
+k8s-1.novalocal ansible_ssh_host=10.126.100.88
+k8s-2.novalocal ansible_ssh_host=10.126.100.89
+
+[all:vars]
+ansible_user=centos
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[docker]
+
+some-wierd-docker-only-machine ansible_ssh_host=10.126.100.90
+
+[docker:vars]
+ansible_user=centos
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[kube-master]
+k8s-1.novalocal
+
+[kube-node]
+k8s-2.novalocal
+
+[k8s-cluster:children]
+kube-master
+kube-node

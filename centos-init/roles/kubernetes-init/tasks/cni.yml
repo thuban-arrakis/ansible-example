@@ -1,0 +1,9 @@
+- name: Kubernetes | Copy Calico CNI manifest
+  copy:
+    src: calico.yaml
+    dest: /tmp/
+  delegate_to: "{{ groups['kube-master'] | first }}"
+
+- name: Kubernetes | Apply Calico CNI
+  command: kubectl --kubeconfig="{{ kube_config }}" apply -f /tmp/calico.yaml
+  delegate_to: "{{ groups['kube-master'] | first }}"

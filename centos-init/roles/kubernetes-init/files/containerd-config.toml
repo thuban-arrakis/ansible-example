@@ -1,0 +1,47 @@
+# persistent data location
+root = "/var/lib/containerd"
+# runtime state information
+state = "/run/containerd"
+
+# Kubernetes doesn't use containerd restart manager.
+disabled_plugins = ["restart"]
+
+[debug]
+  level = ""
+
+[grpc]
+  max_recv_message_size = 16777216
+  max_send_message_size = 16777216
+
+[plugins.linux]
+  shim = "/usr/bin/containerd-shim"
+  runtime = "/usr/bin/runc"
+
+[plugins.cri]
+  stream_server_address = "127.0.0.1"
+  max_container_log_line_size = -1
+  sandbox_image = "k8s.gcr.io/pause:3.3"
+  systemd_cgroup = true
+
+[plugins.cri.cni]
+  bin_dir = "/opt/cni/bin"
+  conf_dir = "/etc/cni/net.d"
+  conf_template = ""
+
+
+[plugins.cri.containerd.default_runtime]
+  runtime_type = "io.containerd.runtime.v1.linux"
+  runtime_engine = ""
+  runtime_root = ""
+
+
+
+[plugins.cri.containerd.untrusted_workload_runtime]
+  runtime_type = ""
+  runtime_engine = ""
+  runtime_root = ""
+
+[plugins.cri.registry]
+[plugins.cri.registry.mirrors]
+[plugins.cri.registry.mirrors."docker.io"]
+  endpoint = ["https://registry-1.docker.io"]

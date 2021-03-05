@@ -1,0 +1,49 @@
+---
+
+- name: Docker | Install Docker packages
+  yum:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - yum-utils
+      - device-mapper-persistent-data
+      - lvm2
+      - docker-compose
+    state: present
+    update_cache: true
+
+- name: Docker | Create /etc/docker directory
+  file:
+    path: /etc/docker
+    state: directory
+
+- name: Docker | Create Docker Daemon file
+  copy:
+    dest: "/etc/docker/daemon.json"
+    content: |
+      {
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m"
+        },
+        "storage-driver": "overlay2",
+        "storage-opts": [
+          "overlay2.override_kernel_check=true"
+        ]
+      }
+
+- name: Docker| Create Docker Systemd directory
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: 0755
+  notify: OS | Reload systemd
+
+- name: Docker | Enable docker
+  systemd:
+    name: docker
+    enabled: yes
+    state: started
+  notify: Docker | Start docker

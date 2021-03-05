@@ -1,0 +1,8 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: {{ hostvars[groups['kube-master'][0]]['inventory_hostname'] }}:{{ kube_apiserver_port }}
+    token: {{ kubeadm_token }}
+    unsafeSkipCAVerification: true

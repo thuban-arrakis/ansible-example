@@ -1,0 +1,187 @@
+---
+
+- name: Hosts | create list from inventory
+  set_fact:
+    etc_hosts_inventory_block: |-
+      {% for item in (groups['k8s-cluster']|default([]))|unique -%}
+      {% if 'access_ip' in hostvars[item] or 'ip' in hostvars[item] or 'ansible_default_ipv4' in hostvars[item] -%}
+      {{ hostvars[item]['access_ip'] | default(hostvars[item]['ip'] | default(hostvars[item]['ansible_default_ipv4']['address'])) }} {{ item }}
+      {% endif %}
+      {% endfor %}
+      10.124.96.156  k8s.gcr.io quay.io registry-1.docker.io docker.elastic.co mcr.microsoft.com registry.gitlab.com
+  delegate_to: localhost
+  connection: local
+  delegate_facts: yes
+  run_once: yes
+
+- name: Hosts | populate inventory into hosts file
+  blockinfile:
+    path: /etc/hosts
+    block: "{{ hostvars.localhost.etc_hosts_inventory_block }}"
+    state: present
+    create: yes
+    backup: yes
+    unsafe_writes: yes
+    marker: "# Ansible inventory hosts {mark}"
+
+- name: OS | Check swap
+  command: /sbin/swapon -s
+  register: swapon
+  changed_when: no
+
+- name: OS | Disable swap
+  command: /sbin/swapoff -a
+  when: swapon.stdout
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: OS | Remove swapfile from /etc/fstab
+  mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  with_items:
+    - swap
+    - none
+
+- name: OS | Put SELinux in permissive mode, logging actions that would be blocked
+  selinux:
+    policy: targeted
+    state: permissive
+
+- name: OS | Recursively search for *.repo files
+  find:
+    paths: 
+      - /etc/yum.repos.d
+      - /etc/yum.repos.d/orig
+    excludes:
+      - "local.repo"
+    depth: 3
+    patterns: '*.repo'
+  register: repo_to_delete
+
+- name: OS | Deleting default repos
+  file:
+      path: '{{ item.path }}'
+      state: absent
+  with_items: '{{ repo_to_delete.files }}'
+
+- name: OS | Deploy certs
+  copy:
+    src: '{{ role_path }}/files/{{ item.src }}'
+    dest: '/etc/pki/ca-trust/source/anchors/{{ item.dest }}'
+  loop:
+    - { src: RootCA.crt, dest: RootCA.crt }
+    - { src: IntCA.crt, dest: IntCA.crt }
+    - { src: RnDRootCA.crt, dest: RnDRootCA.crt }
+    - { src: RnDIntCA.crt, dest: RnDIntCA.crt }
+  notify: OS | Update ca trust
+  register: certs_added
+
+- name: OS | Update ca trust
+  command: update-ca-trust extract
+  when: certs_added is changed
+
+- name: OS | Add mappings to /etc/dhcp/dhclient.conf
+  template:
+    src: dhclient.conf.j2
+    dest: /etc/dhcp/dhclient.conf
+    owner: root
+    group: root
+  register: dhcp_changed
+
+- name: Reboot server
+  reboot: 
+    msg: "Reboot initiated by Ansible"
+    connect_timeout: 5
+    reboot_timeout: 60
+    test_command: whoami
+  when: dhcp_changed is changed
+  ignore_errors: no
+
+- name: OS | Get other local repository
+  get_url:
+    url: http://nexus.dns.com/other/centos7.local.repo
+    dest: /etc/yum.repos.d/local.repo
+
+- name: OS | Install basic list of packages
+  yum:
+    name:
+      - nano
+      - bash-completion
+      - ncdu
+      - htop
+    state: present
+
+# gather facts to update ansible_fqdn
+- name: Update facts
+  setup:
+    gather_subset: min
+
+
+- name: Inject cronyd conf
+  copy:
+    dest: /etc/chrony.conf
+    content: |
+      # These servers were defined in the installation:
+
+      server 10.1.193.100 iburst
+      server 10.120.34.129 iburst
+      server 10.120.34.131 iburst
+      server 10.1.193.100 iburst
+
+      # Use public servers from the pool.ntp.org project.
+      # Please consider joining the pool (http://www.pool.ntp.org/join.html).
+      
+      # Record the rate at which the system clock gains/losses time.
+      driftfile /var/lib/chrony/drift
+      
+      # Allow the system clock to be stepped in the first three updates
+      # if its offset is larger than 1 second.
+      makestep 1.0 3
+      
+      # Enable kernel synchronization of the real-time clock (RTC).
+      rtcsync
+      
+      # Enable hardware timestamping on all interfaces that support it.
+      #hwtimestamp *
+      
+      # Increase the minimum number of selectable sources required to adjust
+      # the system clock.
+      #minsources 2
+      
+      # Allow NTP client access from local network.
+      #allow 192.168.0.0/16
+      
+      # Serve time even if not synchronized to a time source.
+      #local stratum 10
+      
+      # Specify file containing keys for NTP authentication.
+      #keyfile /etc/chrony.keys
+      
+      # Specify directory for log files.
+      logdir /var/log/chrony
+      
+      # Select which information is logged.
+      #log measurements statistics tracking
+  notify:
+    - OS | Restart chronyd service
+
+- name: Set timezone to Europe/Moscow
+  community.general.timezone:
+    name: Europe/Moscow
+
+- name: Create user accounts
+  user:
+    name: "{{ item.username }}"
+    groups: 
+      - "{{ item.groups }}"
+    state: present
+    password: '$6$.b6VEEdG1VAXNv.J$sjfxZgnzqti3X0LpFvmdWoDy4Wzz5T8Ru0GsKYLC6N8Hl9JZVIMCAZ9HWJb7nD553fcSIBKokoHTCs3z239B41'
+  with_items: "{{ users }}"
+
+- name: Add authorized keys
+  authorized_key:
+    user: "{{ item.username }}"
+    key: "{{ lookup('file', item.username + '.pub') }}"
+    exclusive: yes
+  with_items: "{{ users }}"

@@ -1,0 +1,53 @@
+---
+- name: Kubeadm master | Create kubeadm config
+  copy:
+    dest: /tmp/kubeadm-config.yaml
+    content: |
+      apiVersion: kubeadm.k8s.io/v1beta2
+      kind: InitConfiguration
+      nodeRegistration:
+        criSocket: "unix:///var/run/containerd/containerd.sock" 
+      ---
+      apiVersion: kubeadm.k8s.io/v1beta2
+      kind: ClusterConfiguration
+      kubernetesVersion: stable
+      apiServer:
+        certSANs:
+        - "{{ apiserver_sans }}"
+      controlPlaneEndpoint: "{{ controlPlaneIP }}:6443"
+      networking:
+        podSubnet: "192.168.0.0/16"
+      ---
+      kind: KubeletConfiguration
+      apiVersion: kubelet.config.k8s.io/v1beta1
+      cgroupDriver: "systemd"
+  when: is_kube_master
+
+- name: Kubeadm master | Initialize first master
+  command: >-
+    timeout -k 300s 300s
+    {{ bin_dir }}/kubeadm init
+    --config=/tmp/kubeadm-config.yaml
+  register: kubeadm_init
+  delegate_to: "{{ groups['kube-master'] | first }}"
+  # Retry is because upload config sometimes fails
+  retries: 3
+  until: kubeadm_init is succeeded or "field is immutable" in kubeadm_init.stderr
+  when: inventory_hostname == groups['kube-master'] | first
+  failed_when: kubeadm_init.rc != 0 and "field is immutable" not in kubeadm_init.stderr
+  notify: Master | restart kubelet
+
+- name: Kubeadm master | Create kubeadm token for joining nodes with 24h expiration (default)
+  command: "{{ bin_dir }}/kubeadm --kubeconfig /etc/kubernetes/admin.conf token create"
+  changed_when: false
+  register: temp_token
+  retries: 5
+  delay: 5
+  until: temp_token is succeeded
+  delegate_to: "{{ groups['kube-master'] | first }}"
+
+# Set fact to master and worker nodes  
+- name: Kubeadm | Set kubeadm_token
+  set_fact:
+    kubeadm_token: "{{ temp_token.stdout }}"
+  when: temp_token.stdout is defined

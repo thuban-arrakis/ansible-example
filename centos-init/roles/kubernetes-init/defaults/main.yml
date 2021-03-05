@@ -1,0 +1,11 @@
+bin_dir: /usr/bin
+kubelet_config_dir: /var/lib/kubelet/
+kube_config: /etc/kubernetes/admin.conf
+kube_config_dir: /etc/kubernetes
+apiserver_sans: "{{ ansible_host }}"
+controlPlaneIP: "{{ ansible_host }}"
+kube_apiserver_port: 6443
+first_kube_master: "{{ hostvars[groups['kube-master'][0]['ansible_host'] }}"
+kube_apiserver_endpoint: "https://{{ ansible_host }}:{{ kube_apiserver_port }}"
+kubeadm_join_timeout: 120s
+is_kube_master: "{{ inventory_hostname in groups['kube-master'] }}"

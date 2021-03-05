@@ -1,0 +1,16 @@
+---
+- hosts: all
+  gather_facts: true
+  tags: always
+  roles:
+    - { role: default-init, become: true, become_method: sudo, become_user: root }
+
+- hosts: docker
+  gather_facts: true
+  roles:
+    - { role: docker, become: true, become_method: sudo, become_user: root }
+
+- hosts: k8s-cluster
+  gather_facts: true
+  roles:
+    - { role: kubernetes-init, become: true, become_method: sudo, become_user: root }

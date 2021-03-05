@@ -1,0 +1,8 @@
+---
+users:
+- username: user1
+  groups: wheel
+- username: user2
+  groups: wheel
+- username: user3
+  groups: wheel

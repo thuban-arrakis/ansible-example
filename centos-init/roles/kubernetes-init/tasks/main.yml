@@ -1,0 +1,118 @@
+---
+- name: Kubernetes | Check swap # kubelet fails even if ansible_swaptotal_mb = 0
+  command: /sbin/swapon -s
+  register: swapon
+  changed_when: no
+
+- name: Kubernetes | Disable swap
+  command: /sbin/swapoff -a
+  when: swapon.stdout
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Kubernetes | Add kernel module
+  modprobe:
+    name: "{{ item }}" 
+    state: present
+  with_items:
+    - overlay
+    - br_netfilter
+
+- name: Kubernetes | Set bridge-nf-call-{ip6tables,iptables} to 1
+  sysctl:
+    name: "{{ item }}"
+    state: present
+    value: "1"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: yes
+  with_items:
+    - net.ipv4.ip_forward
+    - net.bridge.bridge-nf-call-ip6tables
+    - net.bridge.bridge-nf-call-iptables
+
+- name: Kubernetes | Set vm.swapness to 0
+  sysctl:
+    name: vm.swappiness
+    state: present
+    value: "0"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: yes
+
+- name: Kubernetes | Install a list of packages
+  yum:
+    disable_excludes: kubernetes
+    disable_gpg_check: yes
+    name:
+      - kubelet
+      - kubeadm
+      - containerd.io
+    state: present
+
+- name: Containerd | Ensure containerd config directory
+  file:
+    dest: /etc/containerd
+    state: directory
+    mode: 0755
+    owner: root
+    group: root
+
+- name: Containerd | Populate containerd config file
+  copy:
+    src: containerd-config.toml
+    dest: /etc/containerd/config.toml
+    owner: root
+    mode: 0644
+#  notify: Containerd | Restart Containerd
+
+- name: Containerd | Restart Containerd
+  service:
+    name: containerd
+    state: restarted
+    enabled: yes
+
+- name: Kubernetes | Create Kubelet directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+    - /var/lib/kubelet
+    - /etc/systemd/system/kubelet.service.d
+
+- name: Kubernetes | Create Kubelet Daemon file
+  copy:
+    dest: "{{ kubelet_config_dir }}/config.yaml"
+    content: |
+      kind: KubeletConfiguration
+      apiVersion: kubelet.config.k8s.io/v1beta1
+      cgroupDriver: "systemd"
+
+
+- name: Kubernetes | Create Kubelet systemd conf file
+  copy:
+    dest: "/etc/systemd/system/kubelet.service.d/20-extra-args.conf"
+    content: |
+      [Service]
+      Environment="KUBELET_EXTRA_ARGS=--fail-swap-on=false --container-runtime=remote --container-runtime-endpoint='unix:///var/run/containerd/containerd.sock'"
+  notify: Master | Enable and start kubelet
+
+- name: Enable kubelet
+  systemd:
+    name: kubelet
+    enabled: yes
+
+- name: Kubernetes | Install kubectl package on master nodes only
+  yum:
+    name:
+      - kubectl
+    state: present
+  when: is_kube_master
+
+- name: Kubernetes | Bootstrap master node
+  include_tasks: bootstrap-master.yml
+
+- name: Kubernetes | Bootsrap worker node
+  include_tasks: bootstrap-worker.yml
+  when: not is_kube_master
+
+- name: Kubernetes | Apply Calico CNI
+  include_tasks: cni.yml
+  when: is_kube_master
